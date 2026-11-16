@@ -2,6 +2,13 @@
 
 Plan de producción para películas animadas. Parte de la suite Anymyst (Script, Board, Plan, Studio).
 
+## v0.4.0 — conexión con la suite
+
+- Recibir el guion desde Anymyst Script (menú ⋮ → Enviar a Anymyst Plan, desde Script v0.4.1).
+- Actualizar la etapa Storyboard desde un .anmb de Anymyst Board: con viñetas dibujadas pasa a En curso; si todas tienen dibujo, a Hecho.
+- Sincronizar con la carpeta del PC: lee el guion y el storyboard de la película y deja ahí el plan (.anmp) y el informe PDF.
+- Informe de avance en PDF: resumen, avance por etapa, próximas entregas, hitos y tabla de escenas.
+
 ## v0.3.0 — tiempo, ritmo y organización
 
 - Duración de cada escena calculada del guion (editable) y minutos de película terminados.

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'almacen.dart';
 import 'archivos.dart';
 import 'calendario.dart';
+import 'informe.dart';
 import 'modelo.dart';
 import 'tema.dart';
 
@@ -154,6 +155,90 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
     } catch (e) {
       _avisar('No pude leer el guion: $e');
     }
+  }
+
+  Future<void> _importarStoryboard() async {
+    try {
+      final r = await Plataforma.abrir();
+      if (r == null) return;
+      final (_, n) = aplicarStoryboard(p, r.$2);
+      await _guardar();
+      _avisar(n == 0
+          ? 'El storyboard no cambió ninguna escena (¿coinciden con el guion?)'
+          : 'Storyboard: $n escenas actualizadas');
+    } catch (e) {
+      _avisar('No pude leer el storyboard: $e');
+    }
+  }
+
+  Future<void> _informe() async {
+    try {
+      final ok = await Plataforma.guardar(
+          '${nombreArchivo(p.nombre)}_avance.pdf', 'application/pdf', escribirInforme(p));
+      _avisar(ok ? 'Informe guardado (PDF)' : 'Exportación cancelada');
+    } catch (e) {
+      _avisar('No pude crear el informe: $e');
+    }
+  }
+
+  /// Lee de la carpeta compartida el guion (.anms) y el storyboard (.anmb) de esta película,
+  /// los aplica y deja ahí el plan (.anmp) y el informe en PDF.
+  Future<void> _sincronizarCarpeta() async {
+    final a = widget.almacen;
+    try {
+      if (a.carpetaUri.isEmpty) {
+        final r = await Plataforma.elegirCarpeta();
+        if (r == null) return;
+        a.carpetaUri = r.$1;
+        a.carpetaNombre = r.$2;
+        await a.guardarAjustes();
+      }
+      _avisar('Revisando ${a.carpetaNombre}…');
+      final archivos = await Plataforma.listarCarpeta(a.carpetaUri);
+      archivos.sort((x, y) => y.$2.compareTo(x.$2)); // los más nuevos primero
+      var guion = false, story = 0;
+      for (final (nombre, _) in archivos) {
+        final n = nombre.toLowerCase();
+        if (!guion && n.endsWith('.anms')) {
+          final b = await Plataforma.leerDeCarpeta(a.carpetaUri, nombre);
+          if (b == null) continue;
+          final id = idDeGuion(b);
+          if (p.guionId.isNotEmpty && id != p.guionId) continue;
+          sincronizarConGuion(p, b);
+          guion = true;
+        }
+      }
+      for (final (nombre, _) in archivos) {
+        if (!nombre.toLowerCase().endsWith('.anmb')) continue;
+        final b = await Plataforma.leerDeCarpeta(a.carpetaUri, nombre);
+        if (b == null) continue;
+        final id = idDeStoryboard(b);
+        if (p.guionId.isNotEmpty && id.isNotEmpty && id != p.guionId) continue;
+        story += aplicarStoryboard(p, b).$2;
+        break;
+      }
+      await _guardar();
+      await Plataforma.escribirEnCarpeta(a.carpetaUri, '${nombreArchivo(p.nombre)}.anmp', escribirAnmp(p));
+      await Plataforma.escribirEnCarpeta(
+          a.carpetaUri, '${nombreArchivo(p.nombre)}_avance.pdf', escribirInforme(p));
+      _avisar([
+        guion ? 'Guion actualizado' : 'No encontré el guion de esta película',
+        if (story > 0) 'storyboard: $story escenas',
+        'plan e informe copiados en ${a.carpetaNombre}',
+      ].join(' · '));
+    } catch (e) {
+      _avisar('No pude usar la carpeta: $e');
+    }
+  }
+
+  Future<void> _cambiarCarpeta() async {
+    final r = await Plataforma.elegirCarpeta();
+    if (r == null) return;
+    widget.almacen
+      ..carpetaUri = r.$1
+      ..carpetaNombre = r.$2;
+    await widget.almacen.guardarAjustes();
+    _avisar('Carpeta: ${r.$2}');
   }
 
   Future<void> _exportar() async {
@@ -768,6 +853,18 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                 case 'exportar':
                   _exportar();
                   break;
+                case 'board':
+                  _importarStoryboard();
+                  break;
+                case 'informe':
+                  _informe();
+                  break;
+                case 'carpeta':
+                  _sincronizarCarpeta();
+                  break;
+                case 'cambiarCarpeta':
+                  _cambiarCarpeta();
+                  break;
                 case 'proyecto':
                   _editarProyecto();
                   break;
@@ -779,6 +876,24 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                   child: ListTile(
                       leading: Icon(Icons.description),
                       title: Text('Importar o actualizar desde el guion (.anms)'))),
+              PopupMenuItem(
+                  value: 'board',
+                  child: ListTile(
+                      leading: Icon(Icons.view_carousel),
+                      title: Text('Actualizar storyboard desde Board (.anmb)'))),
+              PopupMenuItem(
+                  value: 'carpeta',
+                  child: ListTile(
+                      leading: Icon(Icons.sync),
+                      title: Text('Sincronizar con la carpeta del PC'),
+                      subtitle: Text('Lee guion y storyboard; deja plan e informe'))),
+              PopupMenuItem(
+                  value: 'cambiarCarpeta',
+                  child: ListTile(leading: Icon(Icons.folder_shared), title: Text('Cambiar carpeta'))),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                  value: 'informe',
+                  child: ListTile(leading: Icon(Icons.picture_as_pdf), title: Text('Informe de avance (PDF)'))),
               PopupMenuItem(
                   value: 'exportar',
                   child: ListTile(leading: Icon(Icons.ios_share), title: Text('Exportar plan (.anmp)'))),

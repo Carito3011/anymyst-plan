@@ -154,3 +154,66 @@ Proyecto leerAnmp(Uint8List bytes) {
   p.id = nuevoId();
   return p;
 }
+
+/// Id del guion dentro de un .anms ('' si no se puede leer).
+String idDeGuion(Uint8List bytes) {
+  try {
+    final json = leerZip(bytes)['anymyst.json'];
+    if (json == null) return '';
+    return ((jsonDecode(utf8.decode(json)) as Map)['id'] ?? '').toString();
+  } catch (_) {
+    return '';
+  }
+}
+
+/// Lee un storyboard de Anymyst Board (.anmb) y marca la etapa Storyboard.
+/// Una escena con viñetas pasa a "En curso"; si todas sus viñetas tienen dibujo, a "Hecho".
+/// Nunca baja una etapa que ya estaba más avanzada. Devuelve (guionId, escenas actualizadas).
+(String, int) aplicarStoryboard(Proyecto p, Uint8List bytes) {
+  final json = leerZip(bytes)['anymyst-board.json'];
+  if (json == null) throw const FormatException('No es un storyboard de Anymyst Board');
+  final t = Map<String, dynamic>.from(jsonDecode(utf8.decode(json)) as Map);
+  String normal(String s) => s.toUpperCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+  const orden = ['pendiente', 'curso', 'revision', 'hecho'];
+  var n = 0;
+  for (final eb in (t['escenas'] as List?) ?? []) {
+    final m = Map<String, dynamic>.from(eb as Map);
+    final idGuion = (m['idGuion'] ?? '').toString();
+    final enc = normal((m['encabezado'] ?? '').toString());
+    Escena? e;
+    for (final x in p.escenas) {
+      if ((idGuion.isNotEmpty && x.idGuion == idGuion) || (enc.isNotEmpty && normal(x.encabezado) == enc)) {
+        e = x;
+        break;
+      }
+    }
+    if (e == null) continue;
+    final vinetas = (m['vinetas'] as List?) ?? [];
+    if (vinetas.isEmpty) continue;
+    var conDibujo = 0;
+    for (final v in vinetas) {
+      final vm = v as Map;
+      final dibujada = vm['fondo'] == true ||
+          ((vm['capas'] as List?) ?? []).any((c) => (((c as Map)['trazos'] as List?) ?? []).isNotEmpty);
+      if (dibujada) conDibujo++;
+    }
+    if (conDibujo == 0) continue;
+    final nuevo = conDibujo == vinetas.length ? 'hecho' : 'curso';
+    final actual = e.estadoDe('Storyboard');
+    if (orden.indexOf(nuevo) > orden.indexOf(actual)) {
+      e.ponerEstado('Storyboard', nuevo);
+      n++;
+    }
+  }
+  return ((t['guionId'] ?? '').toString(), n);
+}
+
+String idDeStoryboard(Uint8List bytes) {
+  try {
+    final json = leerZip(bytes)['anymyst-board.json'];
+    if (json == null) return '';
+    return ((jsonDecode(utf8.decode(json)) as Map)['guionId'] ?? '').toString();
+  } catch (_) {
+    return '';
+  }
+}

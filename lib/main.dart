@@ -1,4 +1,6 @@
 // Anymyst Plan — plan de producción para películas animadas. Parte de la suite Anymyst.
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'almacen.dart';
@@ -7,10 +9,11 @@ import 'modelo.dart';
 import 'proyecto.dart';
 import 'tema.dart';
 
-const version = '0.3.0';
+const version = '0.4.0';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  Plataforma.iniciar();
   runApp(const AnymystPlan());
 }
 
@@ -48,6 +51,14 @@ class _InicioState extends State<Inicio> {
     if (!_iniciado) {
       await _almacen.iniciar();
       _iniciado = true;
+      Plataforma.alRecibir = (n, b) => _recibirGuion(b);
+      final r = await Plataforma.archivoRecibido();
+      if (r != null) {
+        final l = await _almacen.listar();
+        if (mounted) setState(() => _proyectos = l);
+        await _recibirGuion(r.$2);
+        return;
+      }
     }
     final l = await _almacen.listar();
     if (mounted) setState(() => _proyectos = l);
@@ -113,6 +124,15 @@ class _InicioState extends State<Inicio> {
         _abrir(p);
         return;
       }
+      await _recibirGuion(bytes);
+    } catch (e) {
+      _avisar('No pude importar: $e');
+    }
+  }
+
+  /// Un guion (.anms) crea su proyecto o actualiza el que ya existe.
+  Future<void> _recibirGuion(Uint8List bytes) async {
+    try {
       final (guionId, _, _) = leerGuion(bytes);
       Proyecto? p;
       for (final x in await _almacen.listar()) {
@@ -126,9 +146,11 @@ class _InicioState extends State<Inicio> {
       await _almacen.guardar(p);
       _avisar('Guion leído: $nuevas escenas nuevas, $cambiadas cambiadas'
           '${fuera > 0 ? ', $fuera ya no están en el guion' : ''}');
-      _abrir(p);
+      if (!mounted) return;
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      await _abrir(p);
     } catch (e) {
-      _avisar('No pude importar: $e');
+      _avisar('No pude leer el guion: $e');
     }
   }
 
