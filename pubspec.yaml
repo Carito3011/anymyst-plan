@@ -1,0 +1,15 @@
+name: anymyst_plan
+description: "Anymyst Plan — plan de producción para películas animadas. Parte de la suite Anymyst."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+# Sin paquetes externos a propósito.
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

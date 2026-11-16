@@ -1,0 +1,88 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Reutilizar descargas de Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-v1
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generar la parte de Android
+        run: |
+          flutter create --project-name anymyst_plan --org com.anymyst --platforms android --no-pub .
+          rm -f test/widget_test.dart
+          cp android_src/*.kt android/app/src/main/kotlin/com/anymyst/anymyst_plan/
+          python3 android_src/manifiesto.py android/app/src/main/AndroidManifest.xml
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp iconos/ic_launcher-$d.png android/app/src/main/res/mipmap-$d/ic_launcher.png
+          done
+          sed -i 's/android:label="[^"]*"/android:label="Anymyst Plan"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Firma fija (para poder actualizar la app sin desinstalar)
+        run: |
+          mkdir -p ~/.android
+          cp android_src/firma.keystore ~/.android/debug.keystore
+
+      - name: Compilar
+        run: |
+          set -o pipefail
+          flutter pub get 2>&1 | tee registro.txt
+          flutter build apk --release --target-platform android-arm64 2>&1 | tee -a registro.txt
+
+      - name: Publicar el APK en la rama "apk"
+        if: success()
+        run: |
+          mkdir -p /tmp/salida
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/salida/anymyst-plan.apk
+          cp registro.txt /tmp/salida/registro.txt
+          cd /tmp/salida
+          git init -q
+          git config user.name "Anymyst Bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -q -b apk
+          git add -A
+          git commit -q -m "APK de ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk
+
+      - name: Guardar el registro de errores en la rama "registro"
+        if: failure()
+        run: |
+          mkdir -p /tmp/registro
+          cp registro.txt /tmp/registro/registro.txt 2>/dev/null || echo "Falló antes de compilar" > /tmp/registro/registro.txt
+          cd /tmp/registro
+          git init -q
+          git config user.name "Anymyst Bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -q -b registro
+          git add -A
+          git commit -q -m "Registro de ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" registro

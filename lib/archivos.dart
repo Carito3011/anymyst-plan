@@ -1,0 +1,123 @@
+// Importar escenas desde Anymyst Script (.anms) y exportar/importar el plan (.anmp).
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'modelo.dart';
+import 'zip.dart';
+
+const mimeAnmp = 'application/x-anymyst-plan';
+
+/// Lee un .anms: (id del guion, título, escenas).
+(String, String, List<Escena>) leerGuion(Uint8List bytes) {
+  final archivos = leerZip(bytes);
+  final json = archivos['anymyst.json'];
+  if (json == null) throw const FormatException('No es un guion de Anymyst Script');
+  final g = Map<String, dynamic>.from(jsonDecode(utf8.decode(json)) as Map);
+  final escenas = <Escena>[];
+  Escena? actual;
+  final texto = StringBuffer();
+  void cerrar() {
+    final e = actual;
+    if (e != null && e.resumen.isEmpty) {
+      final t = texto.toString().trim();
+      e.resumen = t.length > 300 ? '${t.substring(0, 300)}…' : t;
+    }
+    texto.clear();
+  }
+
+  for (final b in (g['bloques'] as List?) ?? []) {
+    final m = Map<String, dynamic>.from(b as Map);
+    final tipo = (m['tipo'] ?? '').toString();
+    final t = (m['texto'] ?? '').toString().trim();
+    if (tipo == 'escena') {
+      cerrar();
+      final nueva = Escena(
+        idGuion: (m['id'] ?? '').toString(),
+        encabezado: t.toUpperCase(),
+        resumen: (m['nota'] ?? '').toString(),
+      );
+      // Si el guion ya lo tiene escrito, la etapa Guion empieza como hecha
+      if (t.isNotEmpty) nueva.etapas['Guion'] = 'hecho';
+      actual = nueva;
+      escenas.add(nueva);
+    } else if (actual != null && t.isNotEmpty && tipo == 'accion') {
+      texto.write('$t ');
+    }
+  }
+  cerrar();
+  return ((g['id'] ?? '').toString(), (g['titulo'] ?? '').toString(), escenas);
+}
+
+/// Pone las escenas del guion en el proyecto sin perder el avance.
+/// Devuelve (nuevas, actualizadas, fuera del guion).
+(int, int, int) sincronizarConGuion(Proyecto p, Uint8List bytes) {
+  final (guionId, titulo, nuevas) = leerGuion(bytes);
+  final viejas = List<Escena>.of(p.escenas);
+  final usadas = <Escena>{};
+  final resultado = <Escena>[];
+  var nn = 0, act = 0;
+  String normal(String s) => s.toUpperCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+  for (final n in nuevas) {
+    Escena? previa;
+    for (final v in viejas) {
+      if (!usadas.contains(v) && v.idGuion.isNotEmpty && v.idGuion == n.idGuion) {
+        previa = v;
+        break;
+      }
+    }
+    if (previa == null) {
+      for (final v in viejas) {
+        if (!usadas.contains(v) && v.idGuion.isEmpty && normal(v.encabezado) == normal(n.encabezado)) {
+          previa = v;
+          break;
+        }
+      }
+    }
+    if (previa != null) {
+      usadas.add(previa);
+      if (previa.encabezado != n.encabezado) act++;
+      previa
+        ..encabezado = n.encabezado
+        ..resumen = n.resumen.isNotEmpty ? n.resumen : previa.resumen
+        ..idGuion = n.idGuion
+        ..fueraDelGuion = false;
+      resultado.add(previa);
+    } else {
+      nn++;
+      resultado.add(n);
+    }
+  }
+  var fuera = 0;
+  for (final v in viejas) {
+    if (usadas.contains(v)) continue;
+    final conAvance = v.etapas.values.any((e) => e != 'pendiente' && e.isNotEmpty);
+    if (!conAvance && v.idGuion.isNotEmpty) continue;
+    v.fueraDelGuion = true;
+    fuera++;
+    resultado.add(v);
+  }
+  p.escenas = resultado;
+  p.guionId = guionId;
+  if ((p.nombre.trim().isEmpty || p.nombre == 'Sin título') && titulo.isNotEmpty) {
+    p.nombre = titulo;
+  }
+  return (nn, act, fuera);
+}
+
+Uint8List escribirAnmp(Proyecto p) => crearZip([
+      EntradaZip('mimetype', Uint8List.fromList(utf8.encode(mimeAnmp))),
+      EntradaZip('anymyst-plan.json',
+          Uint8List.fromList(utf8.encode(const JsonEncoder.withIndent(' ').convert(p.toJson())))),
+      EntradaZip(
+          'LEEME.txt',
+          Uint8List.fromList(utf8.encode('Archivo de Anymyst Plan (.anmp)\n'
+              '- anymyst-plan.json: proyecto, escenas y estado de cada etapa\n'))),
+    ]);
+
+Proyecto leerAnmp(Uint8List bytes) {
+  final json = leerZip(bytes)['anymyst-plan.json'];
+  if (json == null) throw const FormatException('No es un archivo .anmp');
+  final p = Proyecto.fromJson(Map<String, dynamic>.from(jsonDecode(utf8.decode(json)) as Map));
+  p.id = nuevoId();
+  return p;
+}
