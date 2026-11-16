@@ -2,6 +2,14 @@
 
 Plan de producción para películas animadas. Parte de la suite Anymyst (Script, Board, Plan, Studio).
 
+## v0.2.0 — calendario
+
+- Fecha de entrega para cada etapa de cada escena (al abrir la escena, toca "+ fecha"; mantén presionado para quitarla).
+- Sección Calendario con vista de mes y de semana, y botón "Hoy".
+- Hitos de la película (fin del storyboard, festival, estreno…) con el botón "Hito".
+- Avisos: entregas atrasadas en rojo y las que vencen en 3 días en amarillo.
+- El tablero muestra la fecha de entrega en cada casilla, con su color.
+
 ## v0.1.0
 
 - Proyecto: nombre de la película, dirección y descripción.

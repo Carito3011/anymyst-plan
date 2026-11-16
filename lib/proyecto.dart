@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'almacen.dart';
 import 'archivos.dart';
+import 'calendario.dart';
 import 'modelo.dart';
 import 'tema.dart';
 
@@ -18,6 +19,7 @@ class PaginaProyecto extends StatefulWidget {
 class _PaginaProyectoState extends State<PaginaProyecto> {
   Proyecto get p => widget.proyecto;
   int _seccion = 0;
+  final _cal = GlobalKey<CalendarioState>();
 
   Future<void> _guardar() async {
     await widget.almacen.guardar(p);
@@ -93,6 +95,7 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
     final res = TextEditingController(text: e.resumen);
     final notas = TextEditingController(text: e.notas);
     final etapasTemp = Map<String, String>.of(e.etapas);
+    final fechasTemp = Map<String, String>.of(e.fechas);
     final accion = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -130,7 +133,34 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(children: [
-                    SizedBox(width: 110, child: Text(et)),
+                    SizedBox(
+                      width: 110,
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(et),
+                        InkWell(
+                          onTap: () async {
+                            final actual = DateTime.tryParse(fechasTemp[et] ?? '');
+                            final f = await showDatePicker(
+                                context: ctx,
+                                helpText: 'Entrega de $et',
+                                initialDate: actual ?? DateTime.now(),
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime(2040));
+                            if (f != null) set(() => fechasTemp[et] = fechaTexto(f));
+                          },
+                          onLongPress: () => set(() => fechasTemp.remove(et)),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              fechasTemp[et] == null
+                                  ? '+ fecha'
+                                  : '📅 ${fechaBonita(DateTime.parse(fechasTemp[et]!))}',
+                              style: const TextStyle(fontSize: 11, color: Tema.coral),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
                     Expanded(
                       child: Wrap(spacing: 6, runSpacing: 6, children: [
                         for (final (clave, nombre, _, color) in estados)
@@ -177,7 +207,8 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
         ..encabezado = enc.text.trim().toUpperCase()
         ..resumen = res.text.trim()
         ..notas = notas.text.trim()
-        ..etapas = etapasTemp;
+        ..etapas = etapasTemp
+        ..fechas = fechasTemp;
       if (nueva) p.escenas.add(e);
     } else {
       return;
@@ -246,12 +277,27 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
               color: Color(color).withValues(alpha: e.estadoDe(et) == 'pendiente' ? 0.5 : 0.85),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(nombre,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: e.estadoDe(et) == 'pendiente' ? Tema.textoSuave : const Color(0xFF15111C),
-                    fontWeight: FontWeight.w600)),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(nombre,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: e.estadoDe(et) == 'pendiente' ? Tema.textoSuave : const Color(0xFF15111C),
+                      fontWeight: FontWeight.w600)),
+              if (e.fechaDe(et) != null)
+                Builder(builder: (_) {
+                  final f = soloDia(e.fechaDe(et)!);
+                  final ent = Entrega(f, escena: e, etapa: et);
+                  return Container(
+                    margin: const EdgeInsets.only(top: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                        color: colorAlerta(ent.alerta), borderRadius: BorderRadius.circular(4)),
+                    child: Text('${f.day}/${f.month}',
+                        style: const TextStyle(fontSize: 9, color: Color(0xFF15111C))),
+                  );
+                }),
+            ]),
           ),
         ),
       );
@@ -431,13 +477,19 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
   static const _secciones = [
     (Icons.grid_view_outlined, Icons.grid_view, 'Tablero'),
     (Icons.view_list_outlined, Icons.view_list, 'Escenas'),
+    (Icons.calendar_month_outlined, Icons.calendar_month, 'Calendario'),
     (Icons.insights_outlined, Icons.insights, 'Resumen'),
   ];
 
   @override
   Widget build(BuildContext context) {
     final ancha = MediaQuery.sizeOf(context).width >= 900;
-    final cuerpo = IndexedStack(index: _seccion, children: [_tablero(), _escenas(), _resumen()]);
+    final cuerpo = IndexedStack(index: _seccion, children: [
+      _tablero(),
+      _escenas(),
+      Calendario(key: _cal, proyecto: p, alCambiar: _guardar, abrirEscena: _editarEscena),
+      _resumen(),
+    ]);
     return Scaffold(
       appBar: AppBar(
         title: InkWell(
@@ -482,9 +534,15 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
           ),
         ],
       ),
-      floatingActionButton: _seccion == 2
+      floatingActionButton: _seccion == 3
           ? null
-          : FloatingActionButton.extended(
+          : _seccion == 2
+              ? FloatingActionButton.extended(
+                  onPressed: () => _cal.currentState?.editarHito(),
+                  icon: const Icon(Icons.flag),
+                  label: const Text('Hito'),
+                )
+              : FloatingActionButton.extended(
               onPressed: () => _editarEscena(null),
               icon: const Icon(Icons.add),
               label: const Text('Escena'),

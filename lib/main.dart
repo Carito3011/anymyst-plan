@@ -7,7 +7,7 @@ import 'modelo.dart';
 import 'proyecto.dart';
 import 'tema.dart';
 
-const version = '0.1.0';
+const version = '0.2.0';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
