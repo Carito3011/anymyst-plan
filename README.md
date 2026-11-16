@@ -2,6 +2,17 @@
 
 Plan de producción para películas animadas. Parte de la suite Anymyst (Script, Board, Plan, Studio).
 
+## v0.3.0 — tiempo, ritmo y organización
+
+- Duración de cada escena calculada del guion (editable) y minutos de película terminados.
+- Ritmo: etapas terminadas por semana y fecha estimada de fin.
+- Fecha meta: cuántas etapas por semana necesitas para llegar.
+- Tocar el nombre de una etapa en el tablero la marca en todas las escenas (o las del filtro).
+- Filtros: todas, sin terminar, con entregas atrasadas o por etapa que falta.
+- Escenas agrupadas por actos (vienen de Script).
+- Checklist dentro de cada etapa.
+- Cada escena dice qué etapas tiene hechas ("Guion ✓ · 1 de 10 etapas").
+
 ## v0.2.0 — calendario
 
 - Fecha de entrega para cada etapa de cada escena (al abrir la escena, toca "+ fecha"; mantén presionado para quitarla).

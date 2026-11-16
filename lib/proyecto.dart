@@ -19,6 +19,116 @@ class PaginaProyecto extends StatefulWidget {
 class _PaginaProyectoState extends State<PaginaProyecto> {
   Proyecto get p => widget.proyecto;
   int _seccion = 0;
+  String _filtro = 'todas'; // todas | pendientes | atrasadas | <etapa>
+
+  /// Escenas que pasan el filtro, con su número original.
+  List<(int, Escena)> _visibles() {
+    final hoy = soloDia(DateTime.now());
+    final r = <(int, Escena)>[];
+    for (var i = 0; i < p.escenas.length; i++) {
+      final e = p.escenas[i];
+      final ok = switch (_filtro) {
+        'todas' => true,
+        'pendientes' => e.avance < 1,
+        'atrasadas' => etapas.any((et) {
+            final f = e.fechaDe(et);
+            return f != null && e.estadoDe(et) != 'hecho' && soloDia(f).isBefore(hoy);
+          }),
+        _ => e.estadoDe(_filtro) != 'hecho',
+      };
+      if (ok) r.add((i + 1, e));
+    }
+    return r;
+  }
+
+  Widget _selectorFiltro() => DropdownButton<String>(
+        value: _filtro,
+        underline: const SizedBox(),
+        items: [
+          const DropdownMenuItem(value: 'todas', child: Text('Todas las escenas')),
+          const DropdownMenuItem(value: 'pendientes', child: Text('Sin terminar')),
+          const DropdownMenuItem(value: 'atrasadas', child: Text('Con entregas atrasadas')),
+          for (final et in etapas) DropdownMenuItem(value: et, child: Text('Falta $et')),
+        ],
+        onChanged: (v) => setState(() => _filtro = v ?? 'todas'),
+      );
+
+  Future<void> _marcarTodas(String etapa) async {
+    final visibles = _visibles();
+    final nuevo = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('$etapa en ${visibles.length} escenas'
+            '${_filtro == 'todas' ? '' : ' (las del filtro)'}'),
+        children: [
+          for (final (clave, nombre, _, color) in estados)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, clave),
+              child: Row(children: [
+                Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(color: Color(color), borderRadius: BorderRadius.circular(3))),
+                const SizedBox(width: 10),
+                Text('Marcar como $nombre'),
+              ]),
+            ),
+        ],
+      ),
+    );
+    if (nuevo == null) return;
+    for (final (_, e) in visibles) {
+      e.ponerEstado(etapa, nuevo);
+    }
+    await _guardar();
+  }
+
+  Future<void> _editarTareas(String etapa, List<Tarea> lista, void Function(void Function()) set) async {
+    final nueva = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set2) => AlertDialog(
+          title: Text('Checklist de $etapa'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              for (final t in List<Tarea>.of(lista))
+                CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: t.hecha,
+                  title: Text(t.texto),
+                  secondary: IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => set2(() => lista.remove(t)),
+                  ),
+                  onChanged: (v) => set2(() => t.hecha = v ?? false),
+                ),
+              TextField(
+                controller: nueva,
+                decoration: const InputDecoration(hintText: 'Nueva tarea (ej. Personaje David)'),
+                onSubmitted: (x) => set2(() {
+                  if (x.trim().isNotEmpty) lista.add(Tarea(x.trim()));
+                  nueva.clear();
+                }),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (nueva.text.trim().isNotEmpty) lista.add(Tarea(nueva.text.trim()));
+                Navigator.pop(ctx);
+              },
+              child: const Text('Listo'),
+            ),
+          ],
+        ),
+      ),
+    );
+    set(() {});
+  }
   final _cal = GlobalKey<CalendarioState>();
 
   Future<void> _guardar() async {
@@ -96,6 +206,10 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
     final notas = TextEditingController(text: e.notas);
     final etapasTemp = Map<String, String>.of(e.etapas);
     final fechasTemp = Map<String, String>.of(e.fechas);
+    final tareasTemp = {
+      for (final x in e.tareas.entries) x.key: x.value.map((t) => Tarea(t.texto, hecha: t.hecha)).toList()
+    };
+    final dur = TextEditingController(text: e.segundos >= 0 ? '${e.segundos}' : '');
     final accion = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -127,6 +241,14 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                 maxLines: 3,
                 decoration: const InputDecoration(labelText: 'Resumen', border: OutlineInputBorder()),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: dur,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: 'Duración en segundos (se calcula del guion)',
+                    border: OutlineInputBorder()),
+              ),
               const SizedBox(height: 16),
               const Text('Etapas', style: TextStyle(fontWeight: FontWeight.bold)),
               for (final et in etapas)
@@ -156,6 +278,18 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                                   ? '+ fecha'
                                   : '📅 ${fechaBonita(DateTime.parse(fechasTemp[et]!))}',
                               style: const TextStyle(fontSize: 11, color: Tema.coral),
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _editarTareas(et, tareasTemp.putIfAbsent(et, () => []), set),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              (tareasTemp[et] ?? []).isEmpty
+                                  ? '+ checklist'
+                                  : '☑ ${(tareasTemp[et] ?? []).where((t) => t.hecha).length}/${(tareasTemp[et] ?? []).length}',
+                              style: const TextStyle(fontSize: 11, color: Tema.textoSuave),
                             ),
                           ),
                         ),
@@ -207,8 +341,17 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
         ..encabezado = enc.text.trim().toUpperCase()
         ..resumen = res.text.trim()
         ..notas = notas.text.trim()
-        ..etapas = etapasTemp
-        ..fechas = fechasTemp;
+        ..fechas = fechasTemp
+        ..tareas = {
+          for (final x in tareasTemp.entries)
+            if (x.value.isNotEmpty) x.key: x.value
+        }
+        ..segundos = int.tryParse(dur.text.trim()) ?? e.segundos;
+      for (final et in etapas) {
+        if ((etapasTemp[et] ?? 'pendiente') != e.estadoDe(et)) {
+          e.ponerEstado(et, etapasTemp[et] ?? 'pendiente');
+        }
+      }
       if (nueva) p.escenas.add(e);
     } else {
       return;
@@ -217,7 +360,7 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
   }
 
   void _cambiarEstado(Escena e, String etapa) {
-    e.etapas[etapa] = siguienteEstado(e.estadoDe(etapa));
+    e.ponerEstado(etapa, siguienteEstado(e.estadoDe(etapa)));
     _guardar();
   }
 
@@ -262,6 +405,7 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
   /// Tablero: escenas en filas, etapas en columnas. Toca una casilla para cambiar su estado.
   Widget _tablero() {
     if (p.escenas.isEmpty) return _vacio();
+    final visibles = _visibles();
     const anchoNombre = 230.0, anchoCelda = 92.0, alto = 52.0;
     Widget celda(Escena e, String et) {
       final (_, nombre, _, color) = estado(e.estadoDe(et));
@@ -307,9 +451,11 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
         child: Row(children: [
+          _selectorFiltro(),
+          const SizedBox(width: 12),
           const Expanded(
-            child: Text('Toca una casilla para avanzar su estado.',
-                style: TextStyle(color: Tema.textoSuave, fontSize: 13)),
+            child: Text('Toca una casilla para avanzar su estado, o el nombre de una etapa para marcarla en todas.',
+                style: TextStyle(color: Tema.textoSuave, fontSize: 12)),
           ),
           for (final (_, nombre, _, color) in estados) ...[
             Container(
@@ -335,7 +481,9 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                   child: Text('Escena', style: TextStyle(fontWeight: FontWeight.bold)),
                 )),
                 for (final et in etapas)
-                  SizedBox(
+                  InkWell(
+                    onTap: () => _marcarTodas(et),
+                    child: SizedBox(
                     width: anchoCelda,
                     child: Column(children: [
                       Text(et,
@@ -348,14 +496,17 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                       ),
                     ]),
                   ),
+                  ),
               ]),
               const Divider(color: Tema.borde),
               Expanded(
                 child: ListView.builder(
-                  itemCount: p.escenas.length,
-                  itemBuilder: (_, i) {
-                    final e = p.escenas[i];
-                    return Row(children: [
+                  itemCount: visibles.length,
+                  itemBuilder: (_, k) {
+                    final (numero, e) = visibles[k];
+                    final i = numero - 1;
+                    final nuevoActo = e.acto.isNotEmpty && (k == 0 || visibles[k - 1].$2.acto != e.acto);
+                    final fila = Row(children: [
                       SizedBox(
                         width: anchoNombre + 8,
                         child: InkWell(
@@ -385,6 +536,16 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                       ),
                       for (final et in etapas) celda(e, et),
                     ]);
+                    if (!nuevoActo) return fila;
+                    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 0, 4),
+                        child: Text(e.acto.toUpperCase(),
+                            style: const TextStyle(
+                                color: Tema.coral, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                      ),
+                      fila,
+                    ]);
                   },
                 ),
               ),
@@ -397,7 +558,29 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
 
   Widget _escenas() {
     if (p.escenas.isEmpty) return _vacio();
-    return ReorderableListView.builder(
+    if (_filtro != 'todas') {
+      final v = _visibles();
+      return Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: Row(children: [_selectorFiltro()])),
+        Expanded(
+          child: ListView(padding: const EdgeInsets.fromLTRB(12, 4, 12, 96), children: [
+            for (final (n, e) in v) _tarjetaEscena(n, e, key: ValueKey(e.id)),
+            if (v.isEmpty)
+              const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: Text('Ninguna escena cumple el filtro.'))),
+          ]),
+        ),
+      ]);
+    }
+    return Column(children: [
+      Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: Row(children: [
+        _selectorFiltro(),
+        const SizedBox(width: 12),
+        const Expanded(child: Text('Mantén presionada una escena para cambiar el orden.',
+            style: TextStyle(color: Tema.textoSuave, fontSize: 12))),
+      ])),
+      Expanded(child: ReorderableListView.builder(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
       itemCount: p.escenas.length,
       onReorder: (a, b) {
@@ -406,11 +589,16 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
         p.escenas.insert(b, e);
         _guardar();
       },
-      itemBuilder: (_, i) {
-        final e = p.escenas[i];
+      itemBuilder: (_, i) => _tarjetaEscena(i + 1, p.escenas[i], key: ValueKey(p.escenas[i].id)),
+    )),
+    ]);
+  }
+
+  Widget _tarjetaEscena(int numero, Escena e, {Key? key}) {
+        final i = numero - 1;
         final enCurso = etapas.where((et) => e.estadoDe(et) != 'pendiente' && e.estadoDe(et) != 'hecho');
         return Card(
-          key: ValueKey(e.id),
+          key: key,
           child: ListTile(
             onTap: () => _editarEscena(e),
             leading: CircleAvatar(
@@ -425,14 +613,15 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
               const SizedBox(height: 4),
               Text([
                 porcentaje(e.avance),
+                e.resumenEtapas,
+                if (e.segundos > 0) duracionTexto(e.segundos),
+                if (e.acto.isNotEmpty) e.acto,
                 if (enCurso.isNotEmpty) 'En curso: ${enCurso.join(', ')}',
                 if (e.fueraDelGuion) '⚠ Ya no está en el guion',
               ].join(' · ')),
             ]),
           ),
         );
-      },
-    );
   }
 
   Widget _resumen() {
@@ -457,6 +646,8 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
       ]),
       const SizedBox(height: 8),
       _barra(total, alto: 12),
+      const SizedBox(height: 24),
+      _tiempoYRitmo(),
       const SizedBox(height: 28),
       const Text('Avance por etapa', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       const SizedBox(height: 8),
@@ -471,6 +662,70 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
                 child: Text(porcentaje(p.avanceEtapa(et)), textAlign: TextAlign.right)),
           ]),
         ),
+    ]);
+  }
+
+  Widget _dato(String valor, String etiqueta) => Container(
+        width: 170,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+            color: Tema.superficie,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Tema.borde)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(valor, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(etiqueta, style: const TextStyle(color: Tema.textoSuave, fontSize: 12)),
+        ]),
+      );
+
+  Future<void> _elegirMeta() async {
+    final actual = DateTime.tryParse(p.fechaMeta);
+    final f = await showDatePicker(
+        context: context,
+        helpText: 'Fecha meta (estreno o entrega final)',
+        initialDate: actual ?? DateTime.now().add(const Duration(days: 180)),
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2040));
+    if (f == null) return;
+    p.fechaMeta = fechaTexto(f);
+    await _guardar();
+  }
+
+  Widget _tiempoYRitmo() {
+    final ritmo = p.ritmoSemanal;
+    final fin = p.finEstimado;
+    final meta = DateTime.tryParse(p.fechaMeta);
+    final necesario = p.ritmoNecesario;
+    String n(double v) => v.toStringAsFixed(v < 10 ? 1 : 0);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Tiempo y ritmo', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      const SizedBox(height: 10),
+      Wrap(spacing: 10, runSpacing: 10, children: [
+        _dato(duracionTexto(p.segundosTotales), 'duración total del guion'),
+        _dato(duracionTexto(p.segundosTerminados), 'de película terminada'),
+        _dato(duracionTexto(p.segundosAvanzados.round()), 'equivalente avanzado'),
+        _dato('${n(ritmo)} / semana', 'etapas terminadas (últimas 4 semanas)'),
+        _dato(n(p.etapasFaltantes), 'etapas que faltan'),
+        _dato(fin == null ? '—' : '${fechaBonita(fin)} ${fin.year}', 'fin estimado a tu ritmo'),
+      ]),
+      const SizedBox(height: 14),
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.flag, color: Tema.dorado),
+          title: Text(meta == null
+              ? 'Pon una fecha meta (estreno o entrega final)'
+              : 'Meta: ${fechaBonita(meta)} de ${meta.year}'),
+          subtitle: Text(meta == null
+              ? 'Plan te dirá cuánto tienes que avanzar cada semana.'
+              : necesario == null
+                  ? 'La fecha meta ya pasó.'
+                  : 'Necesitas ${n(necesario)} etapas por semana. '
+                      '${ritmo >= necesario ? 'Vas bien ✓' : 'Vas a ${n(ritmo)}: hay que acelerar.'}'),
+          trailing: const Icon(Icons.edit_calendar),
+          onTap: _elegirMeta,
+        ),
+      ),
     ]);
   }
 

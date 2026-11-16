@@ -14,7 +14,18 @@ const mimeAnmp = 'application/x-anymyst-plan';
   if (json == null) throw const FormatException('No es un guion de Anymyst Script');
   final g = Map<String, dynamic>.from(jsonDecode(utf8.decode(json)) as Map);
   final escenas = <Escena>[];
+  final actos = <String, String>{
+    for (final a in (g['actos'] as List?) ?? [])
+      (a as Map)['id'].toString(): (a['nombre'] ?? '').toString()
+  };
   Escena? actual;
+  var lineas = 0.0;
+  void sumarDuracion() {
+    // Una página (~54 líneas) es más o menos un minuto de película
+    final e = actual;
+    if (e != null) e.segundos = (lineas * 60 / 54).round();
+    lineas = 0;
+  }
   final texto = StringBuffer();
   void cerrar() {
     final e = actual;
@@ -29,12 +40,31 @@ const mimeAnmp = 'application/x-anymyst-plan';
     final m = Map<String, dynamic>.from(b as Map);
     final tipo = (m['tipo'] ?? '').toString();
     final t = (m['texto'] ?? '').toString().trim();
+    final largo = t.length;
+    switch (tipo) {
+      case 'escena':
+        lineas += 2;
+      case 'accion':
+        lineas += 1 + (largo / 60).ceil();
+      case 'personaje':
+        lineas += 1;
+      case 'parentesis':
+        lineas += 1;
+      case 'dialogo':
+        lineas += (largo / 35).ceil();
+      default:
+        lineas += 1;
+    }
     if (tipo == 'escena') {
+      lineas -= 2;
+      sumarDuracion();
+      lineas = 2;
       cerrar();
       final nueva = Escena(
         idGuion: (m['id'] ?? '').toString(),
         encabezado: t.toUpperCase(),
         resumen: (m['nota'] ?? '').toString(),
+        acto: actos[(m['acto'] ?? '').toString()] ?? '',
       );
       // Si el guion ya lo tiene escrito, la etapa Guion empieza como hecha
       if (t.isNotEmpty) nueva.etapas['Guion'] = 'hecho';
@@ -44,6 +74,7 @@ const mimeAnmp = 'application/x-anymyst-plan';
       texto.write('$t ');
     }
   }
+  sumarDuracion();
   cerrar();
   return ((g['id'] ?? '').toString(), (g['titulo'] ?? '').toString(), escenas);
 }
@@ -80,6 +111,8 @@ const mimeAnmp = 'application/x-anymyst-plan';
         ..encabezado = n.encabezado
         ..resumen = n.resumen.isNotEmpty ? n.resumen : previa.resumen
         ..idGuion = n.idGuion
+        ..acto = n.acto
+        ..segundos = n.segundos
         ..fueraDelGuion = false;
       resultado.add(previa);
     } else {
