@@ -217,3 +217,44 @@ String idDeStoryboard(Uint8List bytes) {
     return '';
   }
 }
+
+/// Avance que deja Anymyst Studio (<película>_studio.json) en la carpeta compartida.
+/// Sube las etapas que Studio marcó más avanzadas; nunca baja lo que pusiste aquí.
+/// Devuelve (id del guion, etapas cambiadas) o null si no es un avance de Studio.
+(String, int)? aplicarAvanceStudio(Proyecto p, Uint8List bytes) {
+  Map<String, dynamic> t;
+  try {
+    t = Map<String, dynamic>.from(jsonDecode(utf8.decode(bytes)) as Map);
+  } catch (_) {
+    return null;
+  }
+  if (t['formato'] != 'anymyst-studio-avance') return null;
+  final guionId = (t['guion_id'] ?? '').toString();
+  if (p.guionId.isNotEmpty && guionId.isNotEmpty && guionId != p.guionId) return (guionId, 0);
+  String normal(String s) => s.toUpperCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+  const orden = ['pendiente', 'curso', 'revision', 'hecho'];
+  var n = 0;
+  for (final es in (t['escenas'] as List?) ?? []) {
+    final m = Map<String, dynamic>.from(es as Map);
+    final idGuion = (m['idGuion'] ?? '').toString();
+    final enc = normal((m['encabezado'] ?? '').toString());
+    Escena? e;
+    for (final x in p.escenas) {
+      if ((idGuion.isNotEmpty && x.idGuion == idGuion) || (idGuion.isEmpty && enc.isNotEmpty && normal(x.encabezado) == enc)) {
+        e = x;
+        break;
+      }
+    }
+    if (e == null) continue;
+    final et = Map<String, dynamic>.from((m['etapas'] as Map?) ?? {});
+    for (final etapa in etapas) {
+      final nuevo = (et[etapa] ?? '').toString();
+      if (!orden.contains(nuevo)) continue;
+      if (orden.indexOf(nuevo) > orden.indexOf(e.estadoDe(etapa))) {
+        e.ponerEstado(etapa, nuevo);
+        n++;
+      }
+    }
+  }
+  return (guionId, n);
+}

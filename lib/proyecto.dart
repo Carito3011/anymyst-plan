@@ -181,7 +181,7 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
     }
   }
 
-  /// Lee de la carpeta compartida el guion (.anms) y el storyboard (.anmb) de esta película,
+  /// Lee de la carpeta compartida el guion (.anms), el storyboard (.anmb) y el avance de Studio,
   /// los aplica y deja ahí el plan (.anmp) y el informe en PDF.
   Future<void> _sincronizarCarpeta() async {
     final a = widget.almacen;
@@ -217,6 +217,16 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
         story += aplicarStoryboard(p, b).$2;
         break;
       }
+      var studio = -1;
+      for (final (nombre, _) in archivos) {
+        if (!nombre.toLowerCase().endsWith('_studio.json')) continue;
+        final b = await Plataforma.leerDeCarpeta(a.carpetaUri, nombre);
+        if (b == null) continue;
+        final r = aplicarAvanceStudio(p, b);
+        if (r == null || (p.guionId.isNotEmpty && r.$1.isNotEmpty && r.$1 != p.guionId)) continue;
+        studio = r.$2;
+        break;
+      }
       await _guardar();
       await Plataforma.escribirEnCarpeta(a.carpetaUri, '${nombreArchivo(p.nombre)}.anmp', escribirAnmp(p));
       await Plataforma.escribirEnCarpeta(
@@ -224,6 +234,7 @@ class _PaginaProyectoState extends State<PaginaProyecto> {
       _avisar([
         guion ? 'Guion actualizado' : 'No encontré el guion de esta película',
         if (story > 0) 'storyboard: $story escenas',
+        if (studio >= 0) 'Studio: $studio etapas al día',
         'plan e informe copiados en ${a.carpetaNombre}',
       ].join(' · '));
     } catch (e) {
